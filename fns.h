@@ -6,5 +6,5 @@ struct Glyph {
 };
 
 /*format_byte.c*/
-int format_byte(char byte, int *bold, int *italic, int *underline, int *delete, int *overline, int *sup, int *sub);
+int format_byte(char byte, int *bold, int *italic, int *underline, int *strikethrough, int *sup, int *sub, int *supsub);
 int read_glyph(Glyph *glyph, FILE *source);

@@ -8,19 +8,13 @@
 #include "fns.h"
 
 enum { NGLYPHS = 100 };
-enum { PTSIZE = 18 };
+enum { PTSIZE = 18, PTSIZE_SU = 10 };
 enum { WINDOW_WIDTH = 1024, WINDOW_HEIGHT = 768 };
 enum { FONT_NORMAL, FONT_BOLD, FONT_ITALIC, FONT_BOLD_ITALIC, FONT_LEN };
 
 char *font_names[FONT_LEN] = {"DejaVuSans", "DejaVuSans-Bold", "DejaVuSans-Oblique", "DejaVuSans-BoldOblique"};
 TTF_Font *fonts[FONT_LEN];
-
-/*typedef struct Scene Scene;
-struct Scene {
-	int w, h;
-	SDL_Texture *text;
-	SDL_Rect text_rect;
-};*/
+TTF_Font *su_fonts[FONT_LEN];
 
 typedef struct Scene Scene;
 struct Scene {
@@ -47,14 +41,21 @@ load_fonts(void) {
 			fprintf(stderr, "Couldn't load %d pt font from %s: %s\n", PTSIZE, path, SDL_GetError());
 			cleanup(2);
 		}
+		su_fonts[i] = TTF_OpenFont(path, PTSIZE_SU);
+		if (su_fonts[i] == NULL) {
+			fprintf(stderr, "Couldn't load %d pt font from %s: %s\n", PTSIZE_SU, path, SDL_GetError());
+			cleanup(2);
+		}
 	}
 }
 
 void
 close_fonts(void) {
 	int i;
-	for (i = 0; i < FONT_LEN; i++)
+	for (i = 0; i < FONT_LEN; i++) {
 		TTF_CloseFont(fonts[i]);
+		TTF_CloseFont(su_fonts[i]);
+	}
 }
 
 void
@@ -86,38 +87,64 @@ scene_loop(SDL_Renderer *renderer, Scene *scene) {
 	}	
 }
 
-SDL_Surface *
-render_glyph(Glyph *g) {
+int
+render_glyph(Glyph *g, SDL_Surface **ret) {
 	SDL_Color color = {0,0,0}, bgcolor={0xff,0xff,0xff};
-	int bold, italic, underline, delete, overline, sup, sub;
+	int bold, italic, underline, strikethrough, sup, sub, supsub;
+	int font;
+	int baseline;
 	char *byte;
+	TTF_Font **fs;
 	
 	byte = g->bytes;
-	if (format_byte(*byte, &bold, &italic, &underline, &delete, &overline, &sup, &sub))
+	if (format_byte(*byte, &bold, &italic, &underline, &strikethrough, &sup, &sub, &supsub))
 		byte++;
 	
-	if (bold && italic)
-		return TTF_RenderUTF8_Shaded(fonts[FONT_BOLD_ITALIC], byte, color, bgcolor);
-	else if (bold)
-		return TTF_RenderUTF8_Shaded(fonts[FONT_BOLD], byte, color, bgcolor);
-	else if (italic)
-		return TTF_RenderUTF8_Shaded(fonts[FONT_ITALIC], byte, color, bgcolor);
+	if (sup || sub || supsub)
+		fs = su_fonts;
 	else
-		return TTF_RenderUTF8_Shaded(fonts[FONT_NORMAL], byte, color, bgcolor);
+		fs = fonts;
+		
+	baseline = 0;
+	if (sub)
+		baseline = 9;
+	else if(supsub)
+		baseline = 3;
+	
+	if (bold && italic)
+		font = FONT_BOLD_ITALIC;
+	else if (bold)
+		font = FONT_BOLD;
+	else if (italic)
+		font = FONT_ITALIC;
+	else
+		font = FONT_NORMAL;
+		
+	if (underline && strikethrough)
+		TTF_SetFontStyle(fs[font], TTF_STYLE_UNDERLINE | TTF_STYLE_STRIKETHROUGH);
+	else if (underline)
+		TTF_SetFontStyle(fs[font], TTF_STYLE_UNDERLINE);
+	else if (strikethrough)
+		TTF_SetFontStyle(fs[font], TTF_STYLE_STRIKETHROUGH);
+	
+	*ret = TTF_RenderUTF8_Shaded(fs[font], byte, color, bgcolor);
+	TTF_SetFontStyle(fs[font], TTF_STYLE_NORMAL);
+	
+	return baseline;
 }
 
 int
 render_text(SDL_Renderer *renderer, Scene *scene, Glyph *glyphs, int nglyphs) {
-	int i, pos;
+	int i, pos, baseline;
 	SDL_Surface *glyph_sur;
 	
 	pos = 0;
 	scene->nglyphs = 0;
 	for (i = 0; i < nglyphs; i++) {
-		glyph_sur = render_glyph(&glyphs[i]);
+		baseline = render_glyph(&glyphs[i], &glyph_sur);
 		scene->glyphs[i] = SDL_CreateTextureFromSurface(renderer, glyph_sur);
 		scene->rects[i].x = pos;
-		scene->rects[i].y = 0;
+		scene->rects[i].y = baseline;
 		scene->rects[i].w = glyph_sur->w;
 		scene->rects[i].h = glyph_sur->h;
 		pos += glyph_sur->w;
@@ -150,7 +177,7 @@ main(int argc, char *argv[]) {
 	FILE *source;
 	
 	/* Initialize the TTF library */
-	if (TTF_Init() < 0 ) {
+	if (TTF_Init() < 0) {
 		fprintf(stderr, "Couldn't initialize TTF: %s\n",SDL_GetError());
 		SDL_Quit();
 		exit(2);

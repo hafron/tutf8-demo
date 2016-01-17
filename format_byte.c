@@ -6,14 +6,14 @@ enum {	HEADER = 0xC0, /*first two bits*/
 	 BOLD = 0x20,
 	 ITALIC = 0x10,
 	 UNDERLINE = 0x08,
-	 DELETE = 0x04,
+	 STRIKETHROUGH = 0x04,
 	 SUP = 0x02,
 	 SUB = 0x01,
 	 };
 
 int
-format_byte(char byte, int *bold, int *italic, int *underline, int *delete, int *overline, int *sup, int *sub) {
-	*bold = *italic = *underline = *delete = *overline = *sup = *sub = 0;
+format_byte(char byte, int *bold, int *italic, int *underline, int *strikethrough, int *sup, int *sub, int *supsub) {
+	*bold = *italic = *underline = *strikethrough = *sup = *sub = *supsub = 0;
 	if ((byte & HEADER) != 0x80)
 		return 0;
 	if (byte & BOLD)
@@ -22,10 +22,10 @@ format_byte(char byte, int *bold, int *italic, int *underline, int *delete, int 
 		*italic = 1;
 	if (byte & UNDERLINE)
 		*underline = 1;
-	if (byte & DELETE)
-		*delete = 1;
-	if ((byte & SUB) && (byte && SUP))
-		*overline = 1;
+	if (byte & STRIKETHROUGH)
+		*strikethrough = 1;
+	if ((byte & SUB) && (byte & SUP))
+		*supsub = 1;
 	else if (byte & SUP)
 		*sup = 1;
 	else if (byte & SUB)
