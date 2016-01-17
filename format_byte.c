@@ -1,10 +1,8 @@
 #include <stdio.h>
-
-#include "SDL.h"
-
 #include "fns.h"
 
 enum {	HEADER = 0xC0, /*first two bits*/
+	 FIRST = 0x80, /*first bit*/
 	 BOLD = 0x20,
 	 ITALIC = 0x10,
 	 UNDERLINE = 0x08,
@@ -14,7 +12,7 @@ enum {	HEADER = 0xC0, /*first two bits*/
 	 };
 
 int
-format_byte(Uint8 byte, int *bold, int *italic, int *underline, int *delete, int *overline, int *sup, int *sub) {
+format_byte(char byte, int *bold, int *italic, int *underline, int *delete, int *overline, int *sup, int *sub) {
 	*bold = *italic = *underline = *delete = *overline = *sup = *sub = 0;
 	if ((byte & HEADER) != 0x80)
 		return 0;
@@ -36,18 +34,56 @@ format_byte(Uint8 byte, int *bold, int *italic, int *underline, int *delete, int
 	return 1;
 }
 
+int
+ones(char byte) {
+	int n;
+	n = 0;
+	while (byte & 0x80) {
+		byte <<= 1;
+		n++;
+	}
+	return n;
+}
+
 /* Function returns glyph length*/
 int
-read_glyph(Glyph *glyph) {
-	glyph->bytes[0] = 0xA0;
-	glyph->bytes[1] = 0x41; /*A*/
-	glyph->n = 2;
+read_glyph(Glyph *glyph, FILE *source) {
+	char byte;
+	int n, i;
+	
+	byte = fgetc(source);
+
+	n = 0;
+	/*we have read EOF*/
+	if (byte == EOF)
+		return 0;
+	else if ((byte & FIRST) == 0) {
+		glyph->n = 1;
+		glyph->bytes[0] = byte;
+		/*NULL byte at the end of char*/
+		glyph->bytes[1] = '\0';
+		return glyph->n;
+	/*format byte*/
+	} else if ((byte & HEADER) == 0x80) {
+		glyph->bytes[n++] = byte;
+		byte = fgetc(source);
+	}
+	
+	glyph->n = n + 1;
+	/*only one bit*/
+	if ((byte & FIRST) == 0)
+		glyph->bytes[1] = byte;
+	else {
+		glyph->n = n + ones(byte);
+		glyph->bytes[n++] = byte;
+		/*read bytes left*/
+		for (i = n; i < glyph->n; i++) {
+			byte = fgetc(source);
+			glyph->bytes[i] = byte;
+		}
+	}
+	/*NULL byte at the end of char*/
+	glyph->bytes[glyph->n] = '\0';
 	return glyph->n;
 }
 
-Uint16
-utf8_to_utf16(Uint8 *byte, int n) {
-	Uint16 ch = 0;
-	ch += *byte;
-	return ch;
-}

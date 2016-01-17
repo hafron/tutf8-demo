@@ -7,6 +7,7 @@
 
 #include "fns.h"
 
+enum { NGLYPHS = 100 };
 enum { PTSIZE = 18 };
 enum { WINDOW_WIDTH = 1024, WINDOW_HEIGHT = 768 };
 enum { FONT_NORMAL, FONT_BOLD, FONT_ITALIC, FONT_BOLD_ITALIC, FONT_LEN };
@@ -14,11 +15,18 @@ enum { FONT_NORMAL, FONT_BOLD, FONT_ITALIC, FONT_BOLD_ITALIC, FONT_LEN };
 char *font_names[FONT_LEN] = {"DejaVuSans", "DejaVuSans-Bold", "DejaVuSans-Oblique", "DejaVuSans-BoldOblique"};
 TTF_Font *fonts[FONT_LEN];
 
-typedef struct Scene Scene;
+/*typedef struct Scene Scene;
 struct Scene {
 	int w, h;
 	SDL_Texture *text;
 	SDL_Rect text_rect;
+};*/
+
+typedef struct Scene Scene;
+struct Scene {
+	SDL_Texture *glyphs[NGLYPHS];
+	SDL_Rect rects[NGLYPHS];
+	int nglyphs;
 };
 
 void
@@ -51,11 +59,14 @@ close_fonts(void) {
 
 void
 draw_scene(SDL_Renderer *renderer, Scene *scene) {
+	int i;
+	
 	/* Clear the background to background color */
 	SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF);
 	SDL_RenderClear(renderer);
 	
-	SDL_RenderCopy(renderer, scene->text, NULL, &scene->text_rect);
+	for (i = 0; i < scene->nglyphs; i++)
+		SDL_RenderCopy(renderer, scene->glyphs[i], NULL, &scene->rects[i]);
 	SDL_RenderPresent(renderer);
 }
 
@@ -69,69 +80,74 @@ scene_loop(SDL_Renderer *renderer, Scene *scene) {
 			return 2;
         	}
         	switch (e.type) {
-        	case SDL_MOUSEBUTTONDOWN:
-			scene->text_rect.x = e.button.x - scene->w/2;
-			scene->text_rect.y = e.button.y - scene->h/2;
-			scene->text_rect.w = scene->w;
-			scene->text_rect.h = scene->h;
-			draw_scene(renderer, scene);
-			break;
-        		case SDL_QUIT:
-        			return 0;
+        	case SDL_QUIT:
+        		return 0;
         	}
 	}	
 }
 
 SDL_Surface *
 render_glyph(Glyph *g) {
-	SDL_Color color = {0,0,0};
-	int n;
+	SDL_Color color = {0,0,0}, bgcolor={0xff,0xff,0xff};
 	int bold, italic, underline, delete, overline, sup, sub;
-	Uint8 *byte;
-	Uint16 ch;
+	char *byte;
 	
-	n = g->n;
 	byte = g->bytes;
-	if (format_byte(*byte, &bold, &italic, &underline, &delete, &overline, &sup, &sub)) {
-		n--;
+	if (format_byte(*byte, &bold, &italic, &underline, &delete, &overline, &sup, &sub))
 		byte++;
-	}
-	ch = utf8_to_utf16(byte, n);
 	
 	if (bold && italic)
-		return TTF_RenderGlyph_Solid(fonts[FONT_BOLD_ITALIC], ch, color);
+		return TTF_RenderUTF8_Shaded(fonts[FONT_BOLD_ITALIC], byte, color, bgcolor);
 	else if (bold)
-		return TTF_RenderGlyph_Solid(fonts[FONT_BOLD], ch, color);
+		return TTF_RenderUTF8_Shaded(fonts[FONT_BOLD], byte, color, bgcolor);
 	else if (italic)
-		return TTF_RenderGlyph_Solid(fonts[FONT_ITALIC], ch, color);
+		return TTF_RenderUTF8_Shaded(fonts[FONT_ITALIC], byte, color, bgcolor);
 	else
-		return TTF_RenderGlyph_Solid(fonts[FONT_NORMAL], ch, color);
-}
-
-void
-render_text(SDL_Renderer *renderer, Scene *scene) {
-	SDL_Surface *text;
-	Glyph glyph;
-	
-	read_glyph(&glyph);
-	text = render_glyph(&glyph);
-	
-	scene->text_rect.x = (WINDOW_WIDTH - text->w)/2;
-	scene->text_rect.y = (WINDOW_HEIGHT - text->h)/2;
-	scene->text_rect.w = text->w;
-	scene->text_rect.h = text->h;
-
-	scene->text = SDL_CreateTextureFromSurface(renderer, text);
-	scene->w = text->w;
-	scene->h = text->h;
+		return TTF_RenderUTF8_Shaded(fonts[FONT_NORMAL], byte, color, bgcolor);
 }
 
 int
-main(void) {
-	int ret;
+render_text(SDL_Renderer *renderer, Scene *scene, Glyph *glyphs, int nglyphs) {
+	int i, pos;
+	SDL_Surface *glyph_sur;
+	
+	pos = 0;
+	scene->nglyphs = 0;
+	for (i = 0; i < nglyphs; i++) {
+		glyph_sur = render_glyph(&glyphs[i]);
+		scene->glyphs[i] = SDL_CreateTextureFromSurface(renderer, glyph_sur);
+		scene->rects[i].x = pos;
+		scene->rects[i].y = 0;
+		scene->rects[i].w = glyph_sur->w;
+		scene->rects[i].h = glyph_sur->h;
+		pos += glyph_sur->w;
+		scene->nglyphs++;
+		SDL_FreeSurface(glyph_sur);
+	}
+	return 0;
+}
+
+int
+read_source(FILE *source, Glyph *glyph, int glyphs_max) {
+	int nglyphs;
+	nglyphs = 0;
+	while (read_glyph(glyph++, source)) {
+		if (nglyphs >= glyphs_max)
+			return nglyphs;
+
+		nglyphs++;
+	}
+	return nglyphs;
+}
+
+int
+main(int argc, char *argv[]) {
+	int ret, nglyphs;
 	SDL_Window *window;
 	SDL_Renderer *renderer;
 	Scene scene;
+	Glyph glyphs[NGLYPHS];
+	FILE *source;
 	
 	/* Initialize the TTF library */
 	if (TTF_Init() < 0 ) {
@@ -139,19 +155,32 @@ main(void) {
 		SDL_Quit();
 		exit(2);
 	}
-	
+
+	if (argc == 1)
+		nglyphs = read_source(stdin, glyphs, NGLYPHS);
+	else {
+		source = fopen(argv[1], "r");
+		if (source == NULL) {
+			fprintf(stderr, "Cannot open file: %s\n", argv[1]);
+			cleanup(2);
+		}
+		nglyphs = read_source(source, glyphs, NGLYPHS);
+		fclose(source);
+	}
 	load_fonts();
-	
 	if (SDL_CreateWindowAndRenderer(WINDOW_WIDTH, WINDOW_HEIGHT, 0, &window, &renderer) < 0) {
 		fprintf(stderr, "SDL_CreateWindowAndRenderer() failed: %s\n", SDL_GetError());
 		cleanup(2);
 	}
 
-	render_text(renderer, &scene);
+	ret = render_text(renderer, &scene, glyphs, nglyphs);
+	if (ret > 0) {
+		close_fonts();
+		cleanup(ret);
+	}
 	draw_scene(renderer, &scene);
 	
 	ret = scene_loop(renderer, &scene);
-	
 	close_fonts();
 	cleanup(ret);
 	
